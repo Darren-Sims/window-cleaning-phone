@@ -71,9 +71,8 @@
   .row { display: flex; gap: 8px; } .row > * { flex: 1; }
 
   /* Day picker: a strip of days you can swipe along */
-  .days { display: flex; gap: 6px; overflow-x: auto; margin: 0 -16px 12px; padding: 2px 16px 6px; scrollbar-width: none; }
-  .days::-webkit-scrollbar { display: none; }
-  .day { flex: 0 0 auto; min-width: 62px; text-align: center; border: 1px solid var(--line); background: var(--card);
+  .days { display: flex; gap: 6px; margin: 0 0 12px; }
+  .day { flex: 1; min-width: 0; text-align: center; border: 1px solid var(--line); background: var(--card);
     color: var(--text); border-radius: 12px; padding: 6px 8px; font: inherit; cursor: pointer; }
   .day b { display: block; font-size: 13px; } .day span { font-size: 13px; color: var(--muted); }
   .day .n { display: block; font-size: 18px; font-weight: 700; color: var(--text); }
@@ -177,13 +176,13 @@
    ===================================================================== */
 
 /* ---------- 1. Basic app settings ---------- */
-const APP = { name: 'Window Cleaning', slug: 'window-cleaning', version: '1.0.0', macDataVersion: 2 };
+const APP = { name: 'Window Cleaning', slug: 'window-cleaning', version: '1.1.0', macDataVersion: 2 };
 const PHONE_SLUG = APP.slug + '-phone';               // marks the files and storage this phone app makes
 const STORE_KEY = PHONE_SLUG + '-data';               // where your round is saved on the phone
 const LOG_KEY = PHONE_SLUG + '-logs';                 // where troubleshooting logs are saved
 const MAX_LOG_ENTRIES = 500;
 const METHODS = ['Cash', 'Bank transfer', 'Card', 'Cheque', 'Other']; // same list as the Mac app
-const DAYS_SHOWN = 14;                                // how many days the day strip shows
+const DAY_OFFSETS = [-1, 0, 1, 2];                    // the day strip: yesterday, today and the next 2 days
 
 /* ---------- 2. Troubleshooting log ----------
    Records what the app does (and any errors) in plain text.
@@ -322,10 +321,14 @@ const isConfirmed = c => !!c.confirmed && c.confirmed === c.nextDue;
 const byAreaThenAddress = (a, b) =>
   (a.area || '￿').localeCompare(b.area || '￿') || (a.address || '').localeCompare(b.address || '') || a.name.localeCompare(b.name);
 // Jobs to show for a day. Today also includes anything overdue.
+// Yesterday shows only the jobs from yesterday that still haven't been ticked off.
 function jobsFor(day) {
   const t = today();
   return active().filter(c => day === t ? c.nextDue <= t : c.nextDue === day).sort(byAreaThenAddress);
 }
+const yesterday = () => addDays(today(), -1);
+// The date a clean is recorded for: yesterday when ticking off on yesterday's page, otherwise today.
+const workDate = () => ui.tab === 'round' && ui.day < today() ? ui.day : today();
 // The phone's unsent work, for the Mac tab and the reminder.
 function pending() {
   const newCust = data.customers.filter(c => c.phoneNew).length;
@@ -350,7 +353,7 @@ function show(tab) {
 }
 function render() {
   try {
-    if (ui.day < today()) ui.day = today();  // the app was left open overnight
+    if (ui.day < yesterday()) ui.day = today();  // the app was left open overnight
     $('#title').textContent = data.businessName || APP.name;
     $('#headDate').textContent = new Date().toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
     document.querySelectorAll('#nav button').forEach(b => b.classList.toggle('on', b.dataset.tab === ui.tab));
@@ -371,7 +374,7 @@ function renderBanners() {
   if (!isStandalone() && /iPhone|iPad|iPod/.test(navigator.userAgent))
     h += '<div class="banner info"><b>Add this to your Home Screen first.</b> Tap the Share button <b>⎋</b>, then <b>Add to Home Screen</b>, and open it from there. That version works with no signal and keeps your round safe.</div>';
   const p = pending();
-  const oldest = data.visits.reduce((m, v) => v.date < m ? v.date : m, today());
+  const oldest = data.visits.reduce((m, v) => (v.ticked || v.date) < m ? (v.ticked || v.date) : m, today());
   if (p.total && oldest < today() && ui.tab !== 'mac')
     h += '<div class="banner warn"><b>Work from earlier hasn\'t been sent to your Mac.</b> ' + summaryText(p) + '.<br><button class="btn primary" data-action="sendToMac">Send to Mac</button></div>';
   $('#banners').innerHTML = h;
@@ -399,9 +402,9 @@ function renderRound() {
     return;
   }
   let strip = '<div class="days" id="days">';
-  for (let i = 0; i < DAYS_SHOWN; i++) {
+  for (const i of DAY_OFFSETS) {
     const d = addDays(t, i), n = jobsFor(d).length;
-    const label = i === 0 ? 'Today' : i === 1 ? 'Tmrw' : parseDate(d).toLocaleDateString('en-GB', { weekday: 'short' });
+    const label = i === -1 ? 'Yest' : i === 0 ? 'Today' : i === 1 ? 'Tmrw' : parseDate(d).toLocaleDateString('en-GB', { weekday: 'short' });
     strip += '<button class="day' + (d === ui.day ? ' on' : '') + (n ? '' : ' empty') + '" data-action="pickDay" data-day="' + d + '">' +
       '<b>' + label + '</b><span>' + Number(d.slice(8)) + ' ' + parseDate(d).toLocaleDateString('en-GB', { month: 'short' }) + '</span><span class="n">' + n + '</span></button>';
   }
@@ -409,17 +412,21 @@ function renderRound() {
   const jobs = jobsFor(ui.day);
   const takings = jobs.reduce((s, c) => s + c.price, 0);
   const mins = jobs.reduce((s, c) => s + (Number.isInteger(c.mins) ? c.mins : 0), 0);
-  let h = strip + '<h2>' + (ui.day === t ? 'Today' : fmtShort(ui.day)) + '</h2>';
+  const dayName = ui.day === t ? 'Today' : ui.day < t ? 'Yesterday' : fmtShort(ui.day);
+  let h = strip + '<h2>' + dayName + '</h2>';
+  if (ui.day < t && jobs.length) h += '<p class="small muted" style="margin-top:-6px">Still to tick off from yesterday. Ticking one here records it as done yesterday.</p>';
   if (jobs.length) h += '<div class="summary"><span>' + plural(jobs.length, 'job') + ' · ' + money(takings) + '</span><span>' + (mins ? '⏱ ' + fmtMins(mins) : '') + '</span></div>';
-  h += jobs.length ? jobs.map(jobCard).join('') : '<div class="card muted">' + (ui.day === t ? 'Nothing left to do today. 🎉' : 'No jobs due this day.') + '</div>';
+  h += jobs.length ? jobs.map(jobCard).join('') : '<div class="card muted">' + (ui.day === t ? 'Nothing left to do today. 🎉' : ui.day < t ? 'Nothing left over from yesterday.' : 'No jobs due this day.') + '</div>';
 
-  // What's been ticked off today (on this phone), with an Undo for each.
-  const doneToday = data.visits.filter(v => v.date === t);
-  if (ui.day === t && doneToday.length) {
-    const earned = doneToday.reduce((s, v) => s + v.price, 0);
-    const taken = data.payments.filter(p => p.date === t).reduce((s, p) => s + p.amount, 0);
-    h += '<h3>Done today · ' + money(earned) + (taken ? ' · taken ' + money(taken) : '') + '</h3><div class="card"><ul class="done-list">' +
-      doneToday.slice().reverse().map(v => {
+  // What was ticked off on this day: on this phone (with an Undo), and on the Mac.
+  const doneOnDay = data.visits.filter(v => v.date === ui.day);
+  const doneOnMac = ui.day <= t ? active().filter(c => c.last === ui.day && !doneOnDay.some(v => v.customerId === c.id)) : [];
+  if (doneOnDay.length || doneOnMac.length) {
+    const earned = doneOnDay.reduce((s, v) => s + v.price, 0);
+    const taken = data.payments.filter(p => p.date === ui.day).reduce((s, p) => s + p.amount, 0);
+    h += '<h3>Done ' + (ui.day === t ? 'today' : 'yesterday') + (earned ? ' · ' + money(earned) : '') + (taken ? ' · taken ' + money(taken) : '') + '</h3><div class="card"><ul class="done-list">' +
+      doneOnMac.map(c => '<li><span class="what"><b>' + esc(c.name) + '</b><br><span class="small muted">Cleaned (recorded on the Mac)</span></span></li>').join('') +
+      doneOnDay.slice().reverse().map(v => {
         const c = findCustomer(v.customerId); const p = data.payments.find(x => x.visitId === v.id);
         return '<li><span class="what"><b>' + esc(c ? c.name : '?') + '</b><br><span class="small muted">' +
           (v.status === 'done' ? 'Cleaned ' + money(v.price) + (p ? ' · paid (' + esc(p.method) + ')' : '') : 'Skipped') + '</span></span>' +
@@ -522,7 +529,7 @@ function openJob(id) {
     '<label for="j_method" style="margin-top:4px">Paid by</label><select id="j_method">' +
       METHODS.map(m => '<option' + (m === data.lastMethod ? ' selected' : '') + '>' + m + '</option>').join('') + '</select>' +
     '<button class="btn block" data-action="markJob" data-status="skipped" data-id="' + id + '" style="margin-top:12px">Skip this clean</button></div>' +
-    '<p class="small muted">Done = cleaned today. The next clean is booked ' + esc(freqLabel(c)) + ' from today. Skipping books the next one ' + esc(freqLabel(c)) + ' after ' + fmtShort(c.nextDue) + '.</p>';
+    '<p class="small muted">Done = cleaned ' + (workDate() < t ? 'yesterday' : 'today') + '. The next clean is booked ' + esc(freqLabel(c)) + ' from then. Skipping books the next one ' + esc(freqLabel(c)) + ' after ' + fmtShort(c.nextDue) + '.</p>';
   openSheet(esc(c.name), h);
   Log.info('job.open', { customer: id });
 }
@@ -531,9 +538,9 @@ function openJob(id) {
 // done → next clean = today + frequency; skipped → next clean = this due date + frequency.
 function markJob(id, status, method) {
   const c = findCustomer(id); if (!c) return;
-  const t = today();
+  const t = workDate();
   const visit = { id: newId('v'), customerId: c.id, date: t, status: status === 'skipped' ? 'skipped' : 'done',
-    price: status === 'skipped' ? 0 : c.price, prevDue: c.nextDue };
+    price: status === 'skipped' ? 0 : c.price, prevDue: c.nextDue, ticked: today() }; // "ticked" = the day it was ticked off
   data.visits.push(visit);
   c.nextDue = visit.status === 'done' ? nextDate(t, c) : nextDate(c.nextDue, c);
   if (status === 'donePaid' && c.price > 0) {
@@ -542,7 +549,7 @@ function markJob(id, status, method) {
   }
   closeSheet();
   if (save('visit.' + status, { customer: c.id, visit: visit.id, nextDue: c.nextDue })) {
-    toast((visit.status === 'done' ? (status === 'donePaid' ? 'Done & paid: ' : 'Done: ') : 'Skipped: ') + c.name + '. Next ' + fmtShort(c.nextDue) + '.', false, () => undoVisit(visit.id));
+    toast((visit.status === 'done' ? (status === 'donePaid' ? 'Done & paid' : 'Done') : 'Skipped') + (t < today() ? ' yesterday: ' : ': ') + c.name + '. Next ' + fmtShort(c.nextDue) + '.', false, () => undoVisit(visit.id));
   }
   render();
 }
