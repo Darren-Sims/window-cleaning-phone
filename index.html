@@ -1,0 +1,798 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!-- Privacy lock: the page may only use its own files. It cannot send anything over the internet
+     (connect-src 'none'). "worker-src 'self'" allows the small offline helper (sw.js) that keeps
+     the app working with no signal. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data: blob:; manifest-src 'self'; worker-src 'self'; connect-src 'none'; form-action 'none'; base-uri 'none'">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Round">
+<meta name="theme-color" content="#0b6e99">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="manifest" href="manifest.webmanifest">
+<title>Window Cleaning</title>
+<style>
+  :root {
+    --bg: #f3f6f9; --card: #ffffff; --text: #1d2733; --muted: #5d6b7a; --line: #dde4ea;
+    --brand: #0b6e99; --brand-dark: #085577; --brand-soft: #e3f1f8; --head: #0b6e99;
+    --good: #1c7c4a; --good-soft: #e2f4ea; --warn: #a15c00; --warn-soft: #fdf0dc;
+    --bad: #b3261e; --bad-soft: #fbe5e3;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12181e; --card: #1b232b; --text: #e6edf3; --muted: #9aa8b5; --line: #2c3742;
+      --brand: #4fb3e0; --brand-dark: #7cc8ea; --brand-soft: #16303d; --head: #0d3b52;
+      --good: #5cc98e; --good-soft: #163325; --warn: #f0b45a; --warn-soft: #3a2c14;
+      --bad: #f08a83; --bad-soft: #3d1c1a;
+    }
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html { -webkit-text-size-adjust: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    padding-bottom: calc(68px + env(safe-area-inset-bottom)); }
+  header { background: var(--head); color: #fff; padding: calc(env(safe-area-inset-top) + 10px) 16px 10px;
+    display: flex; align-items: baseline; gap: 8px; position: sticky; top: 0; z-index: 5; }
+  header h1 { font-size: 19px; margin: 0; }
+  header .sub { margin-left: auto; font-size: 14px; opacity: .85; white-space: nowrap; }
+  main { padding: 12px 16px 24px; max-width: 40rem; margin: 0 auto; }
+  h2 { font-size: 20px; margin: 4px 0 12px; }
+  h3 { font-size: 16px; margin: 18px 0 8px; }
+  .muted { color: var(--muted); } .small { font-size: 14px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px; margin-bottom: 12px; }
+  .card p:first-child { margin-top: 0; } .card p:last-child { margin-bottom: 0; }
+  .banner { padding: 12px 14px; border-radius: 12px; margin-bottom: 12px; font-size: 15px; }
+  .banner.warn { background: var(--warn-soft); color: var(--warn); }
+  .banner.bad { background: var(--bad-soft); color: var(--bad); }
+  .banner.info { background: var(--brand-soft); color: var(--brand); }
+  .banner .btn { margin-top: 8px; }
+  .badge { display: inline-block; font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
+  .badge.bad { background: var(--bad-soft); color: var(--bad); }
+  .badge.warn { background: var(--warn-soft); color: var(--warn); }
+  .badge.good { background: var(--good-soft); color: var(--good); }
+  .badge.info { background: var(--brand-soft); color: var(--brand); }
+
+  /* Buttons: big enough to hit with a thumb */
+  .btn { font: inherit; font-weight: 600; font-size: 16px; border-radius: 10px; padding: 11px 16px; min-height: 46px;
+    border: 1px solid var(--line); background: var(--card); color: var(--text); cursor: pointer; }
+  .btn.primary { background: var(--brand); border-color: var(--brand); color: #fff; }
+  @media (prefers-color-scheme: dark) { .btn.primary { color: #0b1a22; } }
+  .btn.good { background: var(--good); border-color: var(--good); color: #fff; }
+  @media (prefers-color-scheme: dark) { .btn.good { color: #0b1a22; } }
+  .btn.danger { color: var(--bad); border-color: var(--bad); }
+  .btn.block { display: block; width: 100%; }
+  .btn:active { opacity: .7; }
+  .link { background: none; border: 0; padding: 0; font: inherit; color: var(--brand); text-decoration: underline; cursor: pointer; }
+  .stack > * + * { margin-top: 8px; }
+  .row { display: flex; gap: 8px; } .row > * { flex: 1; }
+
+  /* Day picker: a strip of days you can swipe along */
+  .days { display: flex; gap: 6px; overflow-x: auto; margin: 0 -16px 12px; padding: 2px 16px 6px; scrollbar-width: none; }
+  .days::-webkit-scrollbar { display: none; }
+  .day { flex: 0 0 auto; min-width: 62px; text-align: center; border: 1px solid var(--line); background: var(--card);
+    color: var(--text); border-radius: 12px; padding: 6px 8px; font: inherit; cursor: pointer; }
+  .day b { display: block; font-size: 13px; } .day span { font-size: 13px; color: var(--muted); }
+  .day .n { display: block; font-size: 18px; font-weight: 700; color: var(--text); }
+  .day.empty .n { color: var(--muted); font-weight: 400; }
+  .day.on { background: var(--brand); border-color: var(--brand); color: #fff; }
+  .day.on span, .day.on .n { color: #fff; }
+  @media (prefers-color-scheme: dark) { .day.on, .day.on span, .day.on .n { color: #0b1a22; } }
+
+  /* Job cards */
+  .job { display: flex; align-items: center; gap: 10px; background: var(--card); border: 1px solid var(--line);
+    border-radius: 12px; padding: 10px 10px 10px 14px; margin-bottom: 8px; cursor: pointer; }
+  .job.confirmed { border-left: 5px solid var(--good); padding-left: 10px; }
+  .job-main { flex: 1; min-width: 0; }
+  .job-name { font-weight: 700; font-size: 17px; }
+  .job-addr { font-size: 14px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .job-meta { font-size: 13px; color: var(--muted); margin-top: 2px; }
+  .job-meta .badge { margin-right: 4px; }
+  .tick { flex: 0 0 auto; width: 52px; height: 52px; border-radius: 50%; border: 2px solid var(--good);
+    background: var(--card); color: var(--good); font-size: 26px; font-weight: 700; cursor: pointer; line-height: 1; }
+  .tick:active { background: var(--good); color: #fff; }
+  .done-list { list-style: none; padding: 0; margin: 0; }
+  .done-list li { display: flex; gap: 8px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 15px; }
+  .done-list li:last-child { border-bottom: 0; }
+  .done-list .what { flex: 1; min-width: 0; }
+  .summary { display: flex; justify-content: space-between; font-size: 14px; color: var(--muted); margin: -4px 2px 10px; }
+
+  /* Customers list */
+  .search { width: 100%; }
+  .cust { display: block; width: 100%; text-align: left; font: inherit; color: var(--text); background: var(--card);
+    border: 0; border-bottom: 1px solid var(--line); padding: 10px 14px; cursor: pointer; }
+  .cust:first-child { border-radius: 12px 12px 0 0; } .cust:last-child { border-radius: 0 0 12px 12px; border-bottom: 0; }
+  .cust:only-child { border-radius: 12px; }
+  .cust-list { border: 1px solid var(--line); border-radius: 12px; margin-bottom: 12px; }
+
+  /* Forms */
+  label { display: block; font-weight: 600; font-size: 14px; margin: 12px 0 4px; }
+  input, select, textarea { font: inherit; font-size: 16px; /* 16px stops iPhone zooming in */
+    width: 100%; padding: 10px 12px; min-height: 46px; border: 1px solid var(--line); border-radius: 10px;
+    background: var(--card); color: var(--text); }
+  textarea { min-height: 70px; resize: vertical; }
+  .hint { font-weight: 400; color: var(--muted); }
+  .error-text { color: var(--bad); font-weight: 600; margin-top: 10px; min-height: 1px; }
+
+  /* Bottom sheet (pops up from the bottom of the screen) */
+  dialog { border: 0; padding: 0; margin: auto auto 0; width: 100%; max-width: 40rem; max-height: 92vh;
+    border-radius: 18px 18px 0 0; background: var(--card); color: var(--text); overflow: hidden; }
+  dialog[open] { display: flex; flex-direction: column; animation: up .18s ease-out; }
+  @keyframes up { from { transform: translateY(40px); opacity: .5; } }
+  dialog::backdrop { background: rgba(10,20,30,.45); }
+  .sheet-head { display: flex; align-items: center; padding: 14px 16px 4px; }
+  .sheet-head h2 { margin: 0; font-size: 20px; flex: 1; min-width: 0; }
+  .xbtn { background: var(--bg); border: 0; width: 36px; height: 36px; border-radius: 50%; font-size: 22px; line-height: 1; color: var(--muted); cursor: pointer; }
+  .sheet-body { padding: 4px 16px calc(16px + env(safe-area-inset-bottom)); overflow-y: auto; }
+  .info p { margin: 4px 0; }
+  .contact { display: flex; gap: 8px; margin: 10px 0; }
+  .contact a { flex: 1; text-align: center; text-decoration: none; }
+  a.btn { display: inline-block; }
+
+  /* Bottom tab bar */
+  nav { position: fixed; left: 0; right: 0; bottom: 0; display: flex; background: var(--card); border-top: 1px solid var(--line);
+    padding-bottom: env(safe-area-inset-bottom); z-index: 5; }
+  nav button { flex: 1; background: none; border: 0; font: inherit; font-size: 12px; color: var(--muted); padding: 8px 0 6px; cursor: pointer; }
+  nav button .ic { display: block; font-size: 22px; line-height: 1.2; }
+  nav button.on { color: var(--brand); font-weight: 700; }
+  nav .dot { display: inline-block; min-width: 18px; padding: 0 5px; border-radius: 9px; background: var(--bad); color: #fff; font-size: 11px; font-weight: 700; margin-left: 2px; }
+
+  #toast { position: fixed; left: 12px; right: 12px; bottom: calc(80px + env(safe-area-inset-bottom)); background: #1d2733; color: #fff;
+    padding: 12px 14px; border-radius: 12px; font-size: 15px; display: flex; align-items: center; gap: 10px;
+    opacity: 0; transform: translateY(10px); transition: .2s; pointer-events: none; z-index: 20; max-width: 38rem; margin: 0 auto; }
+  #toast.show { opacity: 1; transform: none; pointer-events: auto; }
+  #toast.bad { background: var(--bad); }
+  #toast span { flex: 1; }
+  .toast-btn { background: #fff; color: #1d2733; border: 0; border-radius: 8px; padding: 8px 14px; font: inherit; font-weight: 700; cursor: pointer; }
+  details summary { cursor: pointer; font-weight: 600; }
+  ol.steps { padding-left: 22px; margin: 8px 0; } ol.steps li { margin: 6px 0; }
+  textarea.log { font: 12px/1.4 ui-monospace, Menlo, monospace; height: 160px; }
+</style>
+</head>
+<body>
+<header><h1 id="title">Window Cleaning</h1><span class="sub" id="headDate"></span></header>
+<main><div id="banners"></div><div id="view"></div></main>
+<nav id="nav">
+  <button data-tab="round"><span class="ic">🧽</span>Round</button>
+  <button data-tab="customers"><span class="ic">👥</span>Customers</button>
+  <button data-tab="mac"><span class="ic">💻</span>Mac <span id="pendingDot"></span></button>
+</nav>
+<dialog id="sheet"></dialog>
+<div id="toast" role="status" aria-live="polite"></div>
+<!-- No "accept" filter: some iPhones grey out .json files when one is set. The file is checked after it's chosen. -->
+<input type="file" id="macFile" hidden>
+
+<script>
+/* =====================================================================
+   WINDOW CLEANING (PHONE) — a cut-down version of the Mac app for your iPhone.
+   It does three things: shows your round, ticks off jobs, and adds new customers.
+   Your round is kept in this phone's own storage and never sent over the internet.
+   It moves between the phone and the Mac only as a file that you AirDrop yourself:
+     Mac → phone: the Mac's normal backup file  (window-cleaning-backup-….json)
+     phone → Mac: a small file of today's work   (window-cleaning-phone-….json)
+   No outside libraries are used.
+   ===================================================================== */
+
+/* ---------- 1. Basic app settings ---------- */
+const APP = { name: 'Window Cleaning', slug: 'window-cleaning', version: '1.0.0', macDataVersion: 2 };
+const PHONE_SLUG = APP.slug + '-phone';               // marks the files and storage this phone app makes
+const STORE_KEY = PHONE_SLUG + '-data';               // where your round is saved on the phone
+const LOG_KEY = PHONE_SLUG + '-logs';                 // where troubleshooting logs are saved
+const MAX_LOG_ENTRIES = 500;
+const METHODS = ['Cash', 'Bank transfer', 'Card', 'Cheque', 'Other']; // same list as the Mac app
+const DAYS_SHOWN = 14;                                // how many days the day strip shows
+
+/* ---------- 2. Troubleshooting log ----------
+   Records what the app does (and any errors) in plain text.
+   It NEVER records names, addresses, phone numbers, notes or money amounts —
+   only internal ID codes and counts. */
+const Log = {
+  entries: [],
+  load() {
+    try { const s = JSON.parse(localStorage.getItem(LOG_KEY) || '[]'); this.entries = Array.isArray(s) ? s : []; }
+    catch (e) { this.entries = []; }
+  },
+  add(level, event, details) {
+    this.entries.push({ t: new Date().toISOString(), level, event, details: details || {} });
+    if (this.entries.length > MAX_LOG_ENTRIES) this.entries.splice(0, this.entries.length - MAX_LOG_ENTRIES);
+    try { localStorage.setItem(LOG_KEY, JSON.stringify(this.entries)); } catch (e) { /* storage full: keep in memory */ }
+    if (level === 'ERROR') console.error('[' + APP.name + ' phone]', event, details);
+  },
+  info(e, d) { this.add('INFO', e, d); }, warn(e, d) { this.add('WARN', e, d); }, error(e, d) { this.add('ERROR', e, d); },
+  text() {
+    let size = 0;
+    try { size = (localStorage.getItem(STORE_KEY) || '').length; } catch (e) {}
+    return [
+      'WINDOW CLEANING (PHONE) TROUBLESHOOTING LOG',
+      'App version:     ' + APP.version,
+      'Log created:     ' + new Date().toString(),
+      'Browser:         ' + navigator.userAgent,
+      'Home Screen app: ' + (isStandalone() ? 'yes' : 'no'),
+      'Offline helper:  ' + ('serviceWorker' in navigator ? (navigator.serviceWorker.controller ? 'active' : 'not active yet') : 'not supported'),
+      'Storage working: ' + (storageOK ? 'yes' : 'NO'),
+      'Saved data size: ' + size + ' characters',
+      'Record counts:   ' + data.customers.length + ' customers, ' + data.visits.length + ' unsent cleans/skips, ' + data.payments.length + ' unsent payments',
+      'Round from Mac:  ' + (data.fromMac || 'never loaded'),
+      'Last sent:       ' + (data.lastSent || 'never'),
+      'Note: names, addresses, phone numbers, notes and amounts are never logged.',
+      '-------------------------------------------------------------------------'
+    ].concat(this.entries.map(e => e.t + '  ' + e.level.padEnd(5) + '  ' + e.event +
+      (Object.keys(e.details).length ? '  ' + JSON.stringify(e.details) : ''))).join('\n');
+  }
+};
+window.addEventListener('error', e => {
+  Log.error('unexpected.error', { message: String(e.message), line: e.lineno, col: e.colno });
+  toast('Something went wrong. If it keeps happening, send the log from the Mac tab.', true);
+});
+window.addEventListener('unhandledrejection', e => Log.error('unexpected.promise', { message: String(e.reason && e.reason.message || e.reason) }));
+
+/* ---------- 3. Small helpers for dates, money and text (same as the Mac app) ---------- */
+const pad = n => String(n).padStart(2, '0');
+const ymd = d => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+const today = () => ymd(new Date());
+function parseDate(s) { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); }
+function isDate(s) { if (typeof s !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return false; return ymd(parseDate(s)) === s; }
+function addDays(s, n) { const d = parseDate(s); d.setDate(d.getDate() + n); return ymd(d); }
+function addMonths(s, n) {
+  const [y, m, d] = s.split('-').map(Number);
+  const lastDay = new Date(y, m - 1 + n + 1, 0).getDate();
+  return ymd(new Date(y, m - 1 + n, Math.min(d, lastDay)));
+}
+// The date one cleaning interval after "from" for this customer (weeks or calendar months).
+function nextDate(from, c) { return c.unit === 'months' ? addMonths(from, c.every) : addDays(from, c.every * 7); }
+function freqLabel(c) { const w = c.unit === 'months' ? 'month' : 'week'; return c.every === 1 ? 'every ' + w : 'every ' + c.every + ' ' + w + 's'; }
+const maxEvery = unit => unit === 'months' ? 12 : 52;
+function daysBetween(a, b) { return Math.round((parseDate(b) - parseDate(a)) / 86400000); }
+function fmtDate(s) { return isDate(s) ? parseDate(s).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }) : '—'; }
+const fmtShort = s => parseDate(s).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+const fmtMins = m => (m >= 60 ? Math.floor(m / 60) + 'h ' : '') + (m % 60 ? (m % 60) + 'm' : m ? '' : '0m');
+// Money is stored as whole pence (e.g. £12.50 = 1250).
+function money(p) { const abs = Math.abs(p); return (p < 0 ? '−' : '') + '£' + Math.floor(abs / 100).toLocaleString('en-GB') + '.' + pad(abs % 100); }
+function parseMoney(str) {
+  const s = String(str || '').replace(/[£,\s]/g, '');
+  if (!/^\d+(\.\d{1,2})?$/.test(s)) return null;
+  return Math.round(parseFloat(s) * 100);
+}
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+// IDs made on the phone start with "ph" so they can never clash with the Mac's.
+const newId = prefix => 'ph' + prefix + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+const plural = (n, word, many) => n.toLocaleString('en-GB') + ' ' + (n === 1 ? word : many || word + 's');
+const stamp = d => String(d.getFullYear()).slice(2) + pad(d.getMonth() + 1) + pad(d.getDate()) + '-' + pad(d.getHours()) + pad(d.getMinutes());
+const isStandalone = () => navigator.standalone === true || (window.matchMedia && matchMedia('(display-mode: standalone)').matches);
+const $ = sel => document.querySelector(sel);
+
+/* ---------- 4. Your round on the phone ----------
+   data.customers: the Mac's active customers, plus any added on the phone. Each also carries
+                   bal  (balance when it came from the Mac, pence; positive = owes you),
+                   last (date last cleaned, from the Mac) and phoneNew (true if added on the phone).
+   data.visits / data.payments: cleans, skips and payments recorded on the phone that the Mac
+                   hasn't confirmed yet. They're cleared when a Mac file that includes them is loaded. */
+let storageOK = true;
+const emptyData = () => ({ app: PHONE_SLUG, version: 1, businessName: '', fromMac: null, loadedAt: null,
+  lastSent: null, lastMethod: 'Cash', customers: [], visits: [], payments: [] });
+let data = emptyData();
+let loadProblem = false;
+
+function loadData() {
+  let raw = null;
+  try { raw = localStorage.getItem(STORE_KEY); }
+  catch (e) { storageOK = false; Log.error('storage.unavailable', { name: e.name }); return; }
+  if (!raw) { Log.info('data.load.empty'); return; }
+  try {
+    const d = JSON.parse(raw);
+    if (!d || d.app !== PHONE_SLUG || !Array.isArray(d.customers) || !Array.isArray(d.visits) || !Array.isArray(d.payments)) throw new Error('wrong shape');
+    data = Object.assign(emptyData(), d);
+    Log.info('data.load.ok', { customers: data.customers.length, visits: data.visits.length, payments: data.payments.length });
+  } catch (e) {
+    const key = PHONE_SLUG + '-damaged-' + Date.now();
+    try { localStorage.setItem(key, raw); } catch (_) {}
+    Log.error('data.load.failed', { reason: e.message, keptAs: key });
+    loadProblem = true;
+  }
+}
+function save(event, details) {
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(data)); Log.info(event, details); return true; }
+  catch (e) {
+    storageOK = false; Log.error('storage.save.failed', { during: event, name: e.name });
+    toast("That couldn't be saved on this phone. Send your work to the Mac now.", true);
+    return false;
+  }
+}
+
+/* ---------- 5. Calculations ---------- */
+const findCustomer = id => data.customers.find(c => c.id === id);
+const active = () => data.customers.filter(c => c.active !== false);
+// Balance now = balance from the Mac + cleans done on the phone − payments taken on the phone.
+function balanceOf(c) {
+  let b = c.bal || 0;
+  data.visits.forEach(v => { if (v.customerId === c.id && v.status === 'done') b += v.price; });
+  data.payments.forEach(p => { if (p.customerId === c.id) b -= p.amount; });
+  return b;
+}
+function lastDoneOf(c) {
+  let last = c.last || null;
+  data.visits.forEach(v => { if (v.customerId === c.id && v.status === 'done' && (!last || v.date > last)) last = v.date; });
+  return last;
+}
+// Confirmed by the customer on the Mac (only counts while the date hasn't changed).
+const isConfirmed = c => !!c.confirmed && c.confirmed === c.nextDue;
+const byAreaThenAddress = (a, b) =>
+  (a.area || '￿').localeCompare(b.area || '￿') || (a.address || '').localeCompare(b.address || '') || a.name.localeCompare(b.name);
+// Jobs to show for a day. Today also includes anything overdue.
+function jobsFor(day) {
+  const t = today();
+  return active().filter(c => day === t ? c.nextDue <= t : c.nextDue === day).sort(byAreaThenAddress);
+}
+// The phone's unsent work, for the Mac tab and the reminder.
+function pending() {
+  const newCust = data.customers.filter(c => c.phoneNew).length;
+  const done = data.visits.filter(v => v.status === 'done').length;
+  return { done, skipped: data.visits.length - done, payments: data.payments.length, newCust,
+    paid: data.payments.reduce((s, p) => s + p.amount, 0), total: data.visits.length + data.payments.length + newCust };
+}
+function balanceBadge(b) {
+  if (b > 0) return '<span class="badge bad">Owes ' + money(b) + '</span>';
+  if (b < 0) return '<span class="badge good">In credit ' + money(-b) + '</span>';
+  return '';
+}
+
+/* ---------- 6. Screens ---------- */
+const ui = { tab: 'round', day: today(), search: '' };
+const viewEl = $('#view');
+
+function show(tab) {
+  ui.tab = tab;
+  render(); window.scrollTo(0, 0);
+  Log.info('view.open', { view: tab });
+}
+function render() {
+  try {
+    if (ui.day < today()) ui.day = today();  // the app was left open overnight
+    $('#title').textContent = data.businessName || APP.name;
+    $('#headDate').textContent = new Date().toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+    document.querySelectorAll('#nav button').forEach(b => b.classList.toggle('on', b.dataset.tab === ui.tab));
+    const p = pending();
+    $('#pendingDot').innerHTML = p.total ? '<span class="dot">' + p.total + '</span>' : '';
+    renderBanners();
+    ({ round: renderRound, customers: renderCustomers, mac: renderMac })[ui.tab]();
+  } catch (e) {
+    Log.error('render.failed', { view: ui.tab, message: e.message });
+    viewEl.innerHTML = '<div class="banner bad">Sorry, this screen could not be shown. Please copy the log from the Mac tab and send it for help.</div>';
+  }
+}
+function renderBanners() {
+  let h = '';
+  if (!storageOK) h += '<div class="banner bad"><b>This phone is not letting the app save.</b> Changes will be lost when you close it. Make sure you opened it from the Home Screen and not in a Private tab.</div>';
+  if (loadProblem) h += '<div class="banner bad"><b>Your saved round could not be read.</b> It has been kept safely. Load your round from your Mac again (Mac tab). <button class="btn" data-action="dismissLoadProblem">OK</button></div>';
+  // On iPhone, Safari and the Home Screen app keep separate storage, so the round must live in the Home Screen app.
+  if (!isStandalone() && /iPhone|iPad|iPod/.test(navigator.userAgent))
+    h += '<div class="banner info"><b>Add this to your Home Screen first.</b> Tap the Share button <b>⎋</b>, then <b>Add to Home Screen</b>, and open it from there. That version works with no signal and keeps your round safe.</div>';
+  const p = pending();
+  const oldest = data.visits.reduce((m, v) => v.date < m ? v.date : m, today());
+  if (p.total && oldest < today() && ui.tab !== 'mac')
+    h += '<div class="banner warn"><b>Work from earlier hasn\'t been sent to your Mac.</b> ' + summaryText(p) + '.<br><button class="btn primary" data-action="sendToMac">Send to Mac</button></div>';
+  $('#banners').innerHTML = h;
+}
+function summaryText(p) {
+  const bits = [];
+  if (p.done) bits.push(plural(p.done, 'clean'));
+  if (p.skipped) bits.push(plural(p.skipped, 'skip'));
+  if (p.payments) bits.push(plural(p.payments, 'payment') + ' (' + money(p.paid) + ')');
+  if (p.newCust) bits.push(plural(p.newCust, 'new customer'));
+  return bits.join(', ');
+}
+
+// ROUND: a strip of days, the jobs for the chosen day, and what's been done today.
+function renderRound() {
+  const t = today();
+  if (!data.customers.length) {
+    viewEl.innerHTML = '<div class="card"><h2>Welcome 👋</h2><p>Your round isn\'t on this phone yet.</p>' +
+      '<ol class="steps"><li>On your Mac, open Window Cleaning and go to <b>Backup &amp; Settings</b>.</li>' +
+      '<li>Click <b>Send to phone</b>, then AirDrop the file to this iPhone.</li>' +
+      '<li>On the iPhone, choose <b>Save to Files</b>.</li>' +
+      '<li>Come back here and tap the button below, then pick the file.</li></ol>' +
+      '<button class="btn primary block" data-action="loadFromMac">Load my round from the Mac…</button>' +
+      '<p class="small muted" style="margin-top:12px">Or start by adding a customer on the Customers tab.</p></div>';
+    return;
+  }
+  let strip = '<div class="days" id="days">';
+  for (let i = 0; i < DAYS_SHOWN; i++) {
+    const d = addDays(t, i), n = jobsFor(d).length;
+    const label = i === 0 ? 'Today' : i === 1 ? 'Tmrw' : parseDate(d).toLocaleDateString('en-GB', { weekday: 'short' });
+    strip += '<button class="day' + (d === ui.day ? ' on' : '') + (n ? '' : ' empty') + '" data-action="pickDay" data-day="' + d + '">' +
+      '<b>' + label + '</b><span>' + Number(d.slice(8)) + ' ' + parseDate(d).toLocaleDateString('en-GB', { month: 'short' }) + '</span><span class="n">' + n + '</span></button>';
+  }
+  strip += '</div>';
+  const jobs = jobsFor(ui.day);
+  const takings = jobs.reduce((s, c) => s + c.price, 0);
+  const mins = jobs.reduce((s, c) => s + (Number.isInteger(c.mins) ? c.mins : 0), 0);
+  let h = strip + '<h2>' + (ui.day === t ? 'Today' : fmtShort(ui.day)) + '</h2>';
+  if (jobs.length) h += '<div class="summary"><span>' + plural(jobs.length, 'job') + ' · ' + money(takings) + '</span><span>' + (mins ? '⏱ ' + fmtMins(mins) : '') + '</span></div>';
+  h += jobs.length ? jobs.map(jobCard).join('') : '<div class="card muted">' + (ui.day === t ? 'Nothing left to do today. 🎉' : 'No jobs due this day.') + '</div>';
+
+  // What's been ticked off today (on this phone), with an Undo for each.
+  const doneToday = data.visits.filter(v => v.date === t);
+  if (ui.day === t && doneToday.length) {
+    const earned = doneToday.reduce((s, v) => s + v.price, 0);
+    const taken = data.payments.filter(p => p.date === t).reduce((s, p) => s + p.amount, 0);
+    h += '<h3>Done today · ' + money(earned) + (taken ? ' · taken ' + money(taken) : '') + '</h3><div class="card"><ul class="done-list">' +
+      doneToday.slice().reverse().map(v => {
+        const c = findCustomer(v.customerId); const p = data.payments.find(x => x.visitId === v.id);
+        return '<li><span class="what"><b>' + esc(c ? c.name : '?') + '</b><br><span class="small muted">' +
+          (v.status === 'done' ? 'Cleaned ' + money(v.price) + (p ? ' · paid (' + esc(p.method) + ')' : '') : 'Skipped') + '</span></span>' +
+          (canUndo(v) ? '<button class="link small" data-action="undoVisit" data-id="' + v.id + '">Undo</button>' : '') + '</li>';
+      }).join('') + '</ul></div>';
+  }
+  viewEl.innerHTML = h;
+  const on = document.querySelector('.day.on'); if (on) on.scrollIntoView({ inline: 'nearest', block: 'nearest' });
+}
+function jobCard(c) {
+  const t = today();
+  const late = daysBetween(c.nextDue, t);
+  const b = balanceOf(c);
+  const meta = [money(c.price), freqLabel(c)];
+  if (Number.isInteger(c.mins)) meta.push(fmtMins(c.mins));
+  if (c.area) meta.push(esc(c.area));
+  return '<div class="job' + (isConfirmed(c) ? ' confirmed' : '') + '" data-action="openJob" data-id="' + c.id + '">' +
+    '<div class="job-main"><div class="job-name">' + esc(c.name) + '</div>' +
+    '<div class="job-addr">' + esc(c.address || 'No address') + '</div>' +
+    '<div class="job-meta">' + (late > 0 ? '<span class="badge warn">' + plural(late, 'day') + ' late</span>' : '') +
+      (isConfirmed(c) ? '<span class="badge good">✓ Confirmed</span>' : '') + balanceBadge(b) +
+      (late > 0 || isConfirmed(c) || b ? '<br>' : '') + meta.join(' · ') + '</div></div>' +
+    '<button class="tick" data-action="quickDone" data-id="' + c.id + '" aria-label="Mark ' + esc(c.name) + ' done">✓</button></div>';
+}
+
+// CUSTOMERS: search, tap for details, add a new one.
+function renderCustomers() {
+  const q = ui.search.trim().toLowerCase();
+  const list = active().filter(c => !q || (c.name + ' ' + c.address + ' ' + c.area + ' ' + c.phone).toLowerCase().includes(q))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  viewEl.innerHTML = '<button class="btn primary block" data-action="addCustomer">＋ Add new customer</button>' +
+    '<label for="search" style="margin-top:14px">Find a customer</label>' +
+    '<input id="search" class="search" type="search" placeholder="Name, address or area" value="' + esc(ui.search) + '" autocomplete="off">' +
+    '<p class="small muted">' + plural(list.length, 'customer') + '</p>' +
+    (list.length ? '<div class="cust-list">' + list.map(c =>
+      '<button class="cust" data-action="openJob" data-id="' + c.id + '"><b>' + esc(c.name) + '</b>' + (c.phoneNew ? ' <span class="badge info">New</span>' : '') +
+      '<br><span class="small muted">' + esc(c.address || 'No address') + ' · next ' + fmtShort(c.nextDue) + '</span></button>').join('') + '</div>' : '');
+}
+
+// MAC: sending work to the Mac, loading the round from it, help and the log.
+function renderMac() {
+  const p = pending();
+  viewEl.innerHTML = '<h2>Phone ↔ Mac</h2>' +
+    '<div class="card"><h3 style="margin-top:0">1. Send your work to the Mac</h3>' +
+    (p.total ? '<p>Not on your Mac yet: <b>' + summaryText(p) + '</b>.</p>' : '<p class="muted">Nothing new to send. Everything you\'ve done is on your Mac.</p>') +
+    (data.lastSent ? '<p class="small muted">Last sent ' + new Date(data.lastSent).toLocaleString('en-GB') + '.</p>' : '') +
+    '<button class="btn primary block" data-action="sendToMac"' + (p.total ? '' : ' disabled') + '>Send to Mac (AirDrop)</button>' +
+    '<p class="small muted">Then on the Mac: <b>Backup &amp; Settings → Bring in from phone…</b> Sending twice is fine: nothing is added twice.</p></div>' +
+    '<div class="card"><h3 style="margin-top:0">2. Load your round from the Mac</h3>' +
+    '<p>' + (data.fromMac ? 'This phone has your round from the Mac made <b>' + esc(new Date(data.fromMac).toLocaleString('en-GB')) + '</b>.' : 'Your round hasn\'t been loaded from the Mac yet.') + '</p>' +
+    '<button class="btn block" data-action="loadFromMac">Load from Mac…</button>' +
+    '<p class="small muted">Do this after bringing the phone\'s work into the Mac, or when you\'ve changed things on the Mac (moved jobs, new prices…). On the Mac: <b>Backup &amp; Settings → Send to phone</b>.</p></div>' +
+    '<details class="card"><summary>How it works</summary>' +
+    '<p class="small">Your round is kept on this phone only. It never goes over the internet. Your Mac and phone swap it as a file, using AirDrop:</p>' +
+    '<ol class="steps small"><li><b>Evening:</b> tap <b>Send to Mac</b>, choose AirDrop and your Mac. On the Mac, click <b>Bring in from phone…</b> and pick the file from Downloads.</li>' +
+    '<li><b>Then:</b> on the Mac click <b>Send to phone</b> and AirDrop the file back. On the iPhone choose <b>Save to Files</b>, then tap <b>Load from Mac…</b> here.</li></ol>' +
+    '<p class="small">The phone checks that the Mac file includes everything you ticked off before it replaces anything. If it doesn\'t, it warns you first.</p>' +
+    '<p class="small">This app is only the round. Payments history, reports and the Year Summary stay on the Mac.</p></details>' +
+    '<details class="card"><summary>Troubleshooting log</summary><p class="small">If something goes wrong, copy this and send it with a description. It contains no names, addresses, phone numbers, notes or amounts.</p>' +
+    '<textarea class="log" id="logBox" readonly>' + esc(Log.text()) + '</textarea><button class="btn block" data-action="copyLog" style="margin-top:8px">Copy log</button></details>' +
+    '<details class="card"><summary>Remove the round from this phone</summary><p class="small">Deletes your round from this phone only. Your Mac keeps its copy. Anything not yet sent to the Mac will be lost.</p>' +
+    '<button class="btn danger block" data-action="wipe">Remove from this phone…</button></details>' +
+    '<p class="small muted" style="text-align:center">Window Cleaning for iPhone · version ' + APP.version + '</p>';
+}
+
+/* ---------- 7. Job details sheet: done, done & paid, skip ---------- */
+const sheet = $('#sheet');
+let sheetResolve = null;
+function openSheet(title, body) {
+  sheet.innerHTML = '<div class="sheet-head"><h2>' + title + '</h2><button class="xbtn" data-action="closeSheet" aria-label="Close">×</button></div>' +
+    '<div class="sheet-body">' + body + '</div>';
+  if (!sheet.open) sheet.showModal();
+}
+function closeSheet() { if (sheet.open) sheet.close(); }
+sheet.addEventListener('close', () => { if (sheetResolve) { sheetResolve(false); sheetResolve = null; } });
+// Tapping the dark area above the sheet closes it.
+sheet.addEventListener('click', e => { if (e.target === sheet) closeSheet(); });
+function confirmSheet(title, html, okLabel, danger) {
+  openSheet(esc(title), html + '<div class="stack" style="margin-top:16px"><button class="btn block ' + (danger ? 'danger' : 'primary') + '" data-action="confirmYes">' + esc(okLabel) + '</button>' +
+    '<button class="btn block" data-action="closeSheet">Cancel</button></div>');
+  return new Promise(res => { sheetResolve = res; });
+}
+function alertSheet(title, html) { openSheet(esc(title), html + '<button class="btn primary block" data-action="closeSheet" style="margin-top:16px">OK</button>'); }
+
+function openJob(id) {
+  const c = findCustomer(id); if (!c) return;
+  const t = today(), late = daysBetween(c.nextDue, t), b = balanceOf(c), last = lastDoneOf(c);
+  const num = (c.phone || '').replace(/[^\d+]/g, '');
+  let h = '<div class="info">' +
+    '<p>' + esc(c.address || 'No address') + (c.area ? ' · ' + esc(c.area) : '') + '</p>' +
+    (num ? '<div class="contact"><a class="btn" href="sms:' + esc(num) + '">💬 Text</a><a class="btn" href="tel:' + esc(num) + '">📞 Call</a></div>' : '') +
+    '<p class="small">' + money(c.price) + ' · ' + esc(freqLabel(c)) + (Number.isInteger(c.mins) ? ' · ' + fmtMins(c.mins) : '') + '</p>' +
+    '<p class="small">Last cleaned: ' + (last ? fmtShort(last) : 'never') + ' · Next due: <b>' + fmtShort(c.nextDue) + '</b>' +
+      (late > 0 ? ' <span class="badge warn">' + plural(late, 'day') + ' late</span>' : '') + (isConfirmed(c) ? ' <span class="badge good">✓ Confirmed</span>' : '') + '</p>' +
+    (b ? '<p>' + balanceBadge(b) + '</p>' : '') +
+    (c.notes ? '<p class="small">📝 ' + esc(c.notes) + '</p>' : '') + '</div>' +
+    '<div class="stack" style="margin-top:14px">' +
+    '<button class="btn good block" data-action="markJob" data-status="done" data-id="' + id + '">✓ Done</button>' +
+    '<div class="row"><button class="btn primary" data-action="markJob" data-status="donePaid" data-id="' + id + '">✓ Done &amp; paid ' + money(c.price) + '</button></div>' +
+    '<label for="j_method" style="margin-top:4px">Paid by</label><select id="j_method">' +
+      METHODS.map(m => '<option' + (m === data.lastMethod ? ' selected' : '') + '>' + m + '</option>').join('') + '</select>' +
+    '<button class="btn block" data-action="markJob" data-status="skipped" data-id="' + id + '" style="margin-top:12px">Skip this clean</button></div>' +
+    '<p class="small muted">Done = cleaned today. The next clean is booked ' + esc(freqLabel(c)) + ' from today. Skipping books the next one ' + esc(freqLabel(c)) + ' after ' + fmtShort(c.nextDue) + '.</p>';
+  openSheet(esc(c.name), h);
+  Log.info('job.open', { customer: id });
+}
+
+// Records a clean (or skip) made on the phone. Works just like the Mac:
+// done → next clean = today + frequency; skipped → next clean = this due date + frequency.
+function markJob(id, status, method) {
+  const c = findCustomer(id); if (!c) return;
+  const t = today();
+  const visit = { id: newId('v'), customerId: c.id, date: t, status: status === 'skipped' ? 'skipped' : 'done',
+    price: status === 'skipped' ? 0 : c.price, prevDue: c.nextDue };
+  data.visits.push(visit);
+  c.nextDue = visit.status === 'done' ? nextDate(t, c) : nextDate(c.nextDue, c);
+  if (status === 'donePaid' && c.price > 0) {
+    data.lastMethod = METHODS.includes(method) ? method : 'Cash';
+    data.payments.push({ id: newId('p'), customerId: c.id, date: t, amount: c.price, method: data.lastMethod, note: '', visitId: visit.id });
+  }
+  closeSheet();
+  if (save('visit.' + status, { customer: c.id, visit: visit.id, nextDue: c.nextDue })) {
+    toast((visit.status === 'done' ? (status === 'donePaid' ? 'Done & paid: ' : 'Done: ') : 'Skipped: ') + c.name + '. Next ' + fmtShort(c.nextDue) + '.', false, () => undoVisit(visit.id));
+  }
+  render();
+}
+// Only the most recent clean/skip for a customer can be undone (so the next due date goes back correctly).
+function canUndo(v) { return !data.visits.some(x => x.customerId === v.customerId && x.id !== v.id && data.visits.indexOf(x) > data.visits.indexOf(v)); }
+function undoVisit(vid) {
+  const v = data.visits.find(x => x.id === vid); if (!v || !canUndo(v)) return;
+  const c = findCustomer(v.customerId);
+  if (c && isDate(v.prevDue)) c.nextDue = v.prevDue;
+  data.visits = data.visits.filter(x => x.id !== vid);
+  data.payments = data.payments.filter(p => p.visitId !== vid);
+  if (save('visit.undo', { visit: vid })) toast('Undone.');
+  render();
+}
+
+/* ---------- 8. Add a new customer ---------- */
+function openAddCustomer() {
+  const areas = [...new Set(data.customers.map(c => c.area).filter(Boolean))].sort();
+  openSheet('Add customer', '<form data-form="customer" novalidate>' +
+    '<label for="f_name">Name</label><input id="f_name" name="name" maxlength="100" autocomplete="off" autocapitalize="words">' +
+    '<label for="f_address">Address</label><textarea id="f_address" name="address" rows="2" maxlength="300" autocapitalize="words"></textarea>' +
+    '<label for="f_area">Area / round <span class="hint">(optional)</span></label><input id="f_area" name="area" list="areaList" maxlength="60" autocapitalize="words">' +
+    '<datalist id="areaList">' + areas.map(a => '<option value="' + esc(a) + '">').join('') + '</datalist>' +
+    '<label for="f_phone">Phone <span class="hint">(optional)</span></label><input id="f_phone" name="phone" type="tel" maxlength="40">' +
+    '<label for="f_price">Price (£)</label><input id="f_price" name="price" inputmode="decimal" placeholder="e.g. 15">' +
+    '<label>Clean every</label><div class="row"><input name="every" inputmode="numeric" value="1" aria-label="How many">' +
+      '<select name="unit" aria-label="Weeks or months"><option value="months" selected>month(s)</option><option value="weeks">week(s)</option></select></div>' +
+    '<label for="f_due">First clean due</label><input id="f_due" name="nextDue" type="date" value="' + today() + '">' +
+    '<label for="f_notes">Notes <span class="hint">(optional)</span></label><textarea id="f_notes" name="notes" rows="2" maxlength="500"></textarea>' +
+    '<div class="error-text" id="formError"></div>' +
+    '<button class="btn primary block" data-action="submitCustomer" style="margin-top:12px">Add customer</button></form>');
+}
+function submitCustomer() {
+  const form = sheet.querySelector('form[data-form="customer"]'); if (!form) return;
+  const f = new FormData(form);
+  const err = msg => { $('#formError').textContent = msg; Log.warn('form.customer.invalid', { reason: msg }); };
+  const name = String(f.get('name')).trim();
+  const price = parseMoney(f.get('price'));
+  const every = Number(f.get('every'));
+  const unit = f.get('unit') === 'weeks' ? 'weeks' : 'months';
+  const nextDue = String(f.get('nextDue'));
+  if (!name) return err("Please enter the customer's name.");
+  if (price === null) return err('Please enter the price as a number, for example 15 or 15.50.');
+  if (!Number.isInteger(every) || every < 1 || every > maxEvery(unit)) return err('"Clean every" must be a whole number from 1 to ' + maxEvery(unit) + '.');
+  if (!isDate(nextDue)) return err('Please choose the date the first clean is due.');
+  const c = { id: newId('c'), name, address: String(f.get('address')).trim(), area: String(f.get('area')).trim(),
+    phone: String(f.get('phone')).trim(), notes: String(f.get('notes')).trim(), price, every, unit, nextDue,
+    opening: 0, active: true, created: today(), bal: 0, last: null, phoneNew: true };
+  data.customers.push(c);
+  closeSheet();
+  if (save('customer.add', { customer: c.id })) toast(name + ' added. Send to Mac later to add them there too.');
+  render();
+}
+
+/* ---------- 9. Swapping files with the Mac ---------- */
+// The phone's work as a file for the Mac: new customers, plus any customer with a clean/skip
+// (so the Mac gets their new due date), plus the cleans, skips and payments themselves.
+function phoneFile() {
+  const touched = new Set(data.visits.map(v => v.customerId));
+  const customers = data.customers.filter(c => c.phoneNew || touched.has(c.id)).map(c => {
+    const { bal, last, phoneNew, ...rest } = c; return Object.assign(rest, { isNew: !!phoneNew });
+  });
+  return { app: PHONE_SLUG, version: 1, appVersion: APP.version, exportedAt: new Date().toISOString(),
+    fromMac: data.fromMac, customers, visits: data.visits, payments: data.payments };
+}
+async function sendToMac() {
+  const p = pending();
+  if (!p.total) return toast('Nothing new to send.');
+  const name = PHONE_SLUG + '-' + stamp(new Date()) + '.json';
+  const text = JSON.stringify(phoneFile(), null, 1);
+  const file = new File([text], name, { type: 'application/json' });
+  Log.info('send.start', { file: name, visits: data.visits.length, payments: data.payments.length, newCustomers: p.newCust });
+  try {
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file], title: 'Window Cleaning: work from phone' });
+    } else {
+      // No share sheet (e.g. testing on a computer): download the file instead.
+      const url = URL.createObjectURL(file); const a = document.createElement('a');
+      a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+    }
+  } catch (e) {
+    if (e.name === 'AbortError') { Log.info('send.cancelled'); return; }
+    Log.error('send.failed', { name: e.name, message: e.message });
+    return alertSheet("Couldn't send", '<p>The file could not be shared. Please try again. If it keeps happening, copy the log on the Mac tab.</p>');
+  }
+  data.lastSent = new Date().toISOString();
+  save('send.done', { file: name });
+  toast('Sent. Now bring it in on the Mac.');
+  render();
+}
+
+// Checks a Mac backup file. Same rules as the Mac app, so nothing broken gets onto the phone.
+function checkMacBackup(obj) {
+  const errors = [];
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return ['The file does not contain Window Cleaning data.'];
+  if (obj.app === PHONE_SLUG) return ['This is the file your phone makes for the Mac. Load the file your Mac makes instead (named like window-cleaning-backup-….json).'];
+  if (obj.app !== APP.slug && obj.app !== 'round-book') return ["This file isn't from the Window Cleaning app on your Mac."];
+  if (typeof obj.version !== 'number' || obj.version > APP.macDataVersion) return ['This file was made by a newer version of the Mac app. Please update this phone app.'];
+  for (const k of ['customers', 'visits', 'payments']) if (!Array.isArray(obj[k])) errors.push('The "' + k + '" list is missing or damaged.');
+  if (errors.length) return errors;
+  const ids = new Set();
+  obj.customers.forEach((c, i) => {
+    const where = 'Customer ' + (i + 1);
+    if (!c || typeof c.id !== 'string' || !c.id) return errors.push(where + ' has no ID.');
+    if (ids.has(c.id)) return errors.push(where + ' has a duplicate ID.');
+    if (typeof c.name !== 'string' || !c.name.trim()) return errors.push(where + ' has no name.');
+    if (!Number.isInteger(c.price) || c.price < 0) return errors.push(where + ' has an invalid price.');
+    let every = c.every, unit = c.unit;
+    if (every === undefined && Number.isInteger(c.freqWeeks)) { every = c.freqWeeks; unit = 'weeks'; }
+    if ((unit !== 'weeks' && unit !== 'months') || !Number.isInteger(every) || every < 1 || every > maxEvery(unit)) return errors.push(where + ' has an invalid frequency.');
+    if (!isDate(c.nextDue)) return errors.push(where + ' has an invalid next due date.');
+    ids.add(c.id);
+  });
+  obj.visits.forEach((v, i) => { if (!v || !ids.has(v.customerId) || !isDate(v.date) || !Number.isInteger(v.price)) errors.push('Visit record ' + (i + 1) + ' is damaged.'); });
+  obj.payments.forEach((p, i) => { if (!p || !ids.has(p.customerId) || !isDate(p.date) || !Number.isInteger(p.amount)) errors.push('Payment record ' + (i + 1) + ' is damaged.'); });
+  return errors;
+}
+// Turns a Mac backup into the phone's round: active customers only, each with their balance
+// and last clean worked out (so the phone doesn't need years of history).
+function roundFromBackup(obj) {
+  const str = v => typeof v === 'string' ? v : '';
+  const bal = {}, last = {};
+  obj.customers.forEach(c => { bal[c.id] = Number.isInteger(c.opening) ? c.opening : 0; last[c.id] = null; });
+  obj.visits.forEach(v => { if (v.status === 'done') { bal[v.customerId] += v.price; if (!last[v.customerId] || v.date > last[v.customerId]) last[v.customerId] = v.date; } });
+  obj.payments.forEach(p => { bal[p.customerId] -= p.amount; });
+  const d = emptyData();
+  d.businessName = obj.settings && typeof obj.settings.businessName === 'string' ? obj.settings.businessName.slice(0, 100) : '';
+  d.fromMac = typeof obj.exportedAt === 'string' ? obj.exportedAt : new Date().toISOString();
+  d.loadedAt = new Date().toISOString();
+  d.lastMethod = data.lastMethod;
+  d.customers = obj.customers.filter(c => c.active !== false).map(c => {
+    let every = c.every, unit = c.unit;
+    if (every === undefined) { every = c.freqWeeks; unit = 'weeks'; }
+    return { id: c.id, name: c.name.trim(), address: str(c.address), area: str(c.area).trim(), phone: str(c.phone), notes: str(c.notes),
+      price: c.price, every, unit, nextDue: c.nextDue, opening: 0, active: true, created: str(c.created),
+      ...(Number.isInteger(c.mins) ? { mins: c.mins } : {}), ...(isDate(c.confirmed) ? { confirmed: c.confirmed } : {}),
+      bal: bal[c.id], last: last[c.id] };
+  });
+  return d;
+}
+function handleMacFile(file) {
+  if (!file) return;
+  Log.info('load.file.chosen', { sizeBytes: file.size, type: file.type || 'unknown' });
+  if (file.size > 20 * 1024 * 1024) return alertSheet('File too large', '<p>That file is too big to be from Window Cleaning. Choose the file named like <b>window-cleaning-backup-….json</b>.</p>');
+  const reader = new FileReader();
+  reader.onerror = () => { Log.error('load.read.failed', { name: reader.error && reader.error.name }); alertSheet('Could not open file', '<p>The phone would not let the app read that file. Please try again.</p>'); };
+  reader.onload = () => {
+    let obj;
+    try { obj = JSON.parse(reader.result); }
+    catch (e) { Log.warn('load.not.json'); return alertSheet("That isn't the right file", '<p>Choose the file your Mac made, named like <b>window-cleaning-backup-261103-1830.json</b>.</p>'); }
+    const errors = checkMacBackup(obj);
+    if (errors.length) {
+      Log.warn('load.invalid', { problems: errors.length, first: errors.slice(0, 3) });
+      return alertSheet("This file can't be used", '<ul>' + errors.slice(0, 5).map(e => '<li>' + esc(e) + '</li>').join('') + '</ul>' +
+        (errors.length > 5 ? '<p>…and ' + (errors.length - 5) + ' more.</p>' : '') + '<p>Your round on this phone has not been changed.</p>');
+    }
+    // Is everything done on this phone already in the Mac's file? If not, loading would lose it.
+    const macVisits = new Set(obj.visits.map(v => v.id)), macPays = new Set(obj.payments.map(p => p.id)), macCust = new Set(obj.customers.map(c => c.id));
+    const missing = data.visits.filter(v => !macVisits.has(v.id)).length + data.payments.filter(p => !macPays.has(p.id)).length +
+      data.customers.filter(c => c.phoneNew && !macCust.has(c.id)).length;
+    const next = roundFromBackup(obj);
+    const made = obj.exportedAt ? ' made <b>' + esc(new Date(obj.exportedAt).toLocaleString('en-GB')) + '</b>' : '';
+    const older = data.fromMac && obj.exportedAt && obj.exportedAt < data.fromMac;
+    const html = '<p>This file from your Mac' + made + ' has <b>' + plural(next.customers.length, 'customer') + '</b> on the round.</p>' +
+      (older ? '<p class="banner warn">This file is <b>older</b> than the one already on this phone. Check it\'s the newest one in Downloads.</p>' : '') +
+      (missing ? '<p class="banner bad"><b>' + plural(missing, 'thing') + ' you did on this phone ' + (missing === 1 ? "isn't" : "aren't") + ' in this file.</b> ' +
+        'Send your work to the Mac and bring it in there first, then send the round back. If you load this anyway, ' + (missing === 1 ? 'it' : 'they') + ' will be lost.</p>'
+        : (data.visits.length || data.payments.length ? '<p>Everything you did on this phone is included. ✓</p>' : '')) +
+      '<p>It will replace the round on this phone.</p>';
+    confirmSheet('Load round from Mac?', html, missing ? 'Load anyway and lose ' + (missing === 1 ? 'it' : 'them') : 'Load round', !!missing).then(ok => {
+      if (!ok) { Log.info('load.cancelled', { missing }); return; }
+      data = next;
+      if (save('load.done', { customers: data.customers.length, lost: missing })) toast('Round loaded: ' + plural(data.customers.length, 'customer') + '.');
+      ui.day = today(); ui.tab = 'round';
+      render();
+    });
+  };
+  reader.readAsText(file);
+}
+
+/* ---------- 10. Buttons and wiring ---------- */
+let toastTimer, toastUndo = null;
+function toast(msg, bad, undo) {
+  const t = $('#toast');
+  toastUndo = undo || null;
+  t.innerHTML = '<span>' + esc(msg) + '</span>' + (undo ? '<button class="toast-btn" data-action="toastUndo">Undo</button>' : '');
+  t.className = 'show' + (bad ? ' bad' : '');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.className = ''; toastUndo = null; }, undo ? 7000 : bad ? 6000 : 3000);
+}
+const actions = {
+  pickDay(id, el) { ui.day = el.dataset.day; render(); },
+  openJob(id) { openJob(id); },
+  quickDone(id) { markJob(id, 'done'); },
+  markJob(id, el) { markJob(id, el.dataset.status, ($('#j_method') || {}).value); },
+  undoVisit(id) { undoVisit(id); },
+  toastUndo() { const u = toastUndo; $('#toast').className = ''; toastUndo = null; if (u) u(); },
+  addCustomer() { openAddCustomer(); },
+  submitCustomer() { submitCustomer(); },
+  closeSheet() { closeSheet(); },
+  confirmYes() { const r = sheetResolve; sheetResolve = null; closeSheet(); if (r) r(true); },
+  sendToMac() { sendToMac(); },
+  loadFromMac() { const f = $('#macFile'); f.value = ''; f.click(); },
+  dismissLoadProblem() { loadProblem = false; render(); },
+  copyLog() {
+    const text = Log.text();
+    const fallback = () => { const b = $('#logBox'); b.value = text; b.select(); try { document.execCommand('copy'); toast('Log copied.'); } catch (e) { toast('Select the log text and copy it.', true); } };
+    if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(text).then(() => toast('Log copied.'), fallback); else fallback();
+    Log.info('log.copied');
+  },
+  wipe() {
+    const p = pending();
+    confirmSheet('Remove the round from this phone?', '<p>This removes ' + plural(data.customers.length, 'customer') + ' from this phone. Your Mac keeps its copy.</p>' +
+      (p.total ? '<p class="banner bad"><b>Not sent to your Mac yet: ' + summaryText(p) + '.</b> These will be lost.</p>' : ''), 'Remove from phone', true)
+      .then(ok => { if (!ok) return; const m = data.lastMethod; data = emptyData(); data.lastMethod = m; save('data.wiped', { lost: p.total }); toast('Removed from this phone.'); ui.tab = 'round'; render(); });
+  }
+};
+document.addEventListener('click', e => {
+  const tab = e.target.closest('#nav button');
+  if (tab) return show(tab.dataset.tab);
+  const el = e.target.closest('[data-action]');
+  if (!el || !actions[el.dataset.action]) return;
+  e.preventDefault();
+  try { actions[el.dataset.action](el.dataset.id, el); }
+  catch (err) { Log.error('action.failed', { action: el.dataset.action, message: err.message }); toast('Something went wrong. Please try again.', true); }
+});
+document.addEventListener('input', e => {
+  if (e.target.id === 'search') {
+    ui.search = e.target.value;
+    const pos = e.target.selectionStart; renderCustomers();
+    const s = $('#search'); s.focus(); try { s.setSelectionRange(pos, pos); } catch (_) {}
+  }
+});
+document.addEventListener('change', e => { if (e.target.id === 'macFile') handleMacFile(e.target.files[0]); });
+// The Enter key on the add-customer form adds the customer.
+document.addEventListener('submit', e => { e.preventDefault(); if (e.target.dataset.form === 'customer') submitCustomer(); });
+// Coming back to the app the next morning: move on to the new day.
+document.addEventListener('visibilitychange', () => { if (!document.hidden) render(); });
+
+/* ---------- 11. Start the app ---------- */
+Log.load();
+loadData();
+render();
+Log.info('app.start', { version: APP.version, standalone: isStandalone(), protocol: location.protocol, customers: data.customers.length });
+// Offline helper: keeps the app's own files on the phone so it opens with no signal.
+// Only works when the app is opened from its web address (not from a file).
+if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
+  navigator.serviceWorker.register('sw.js').then(() => Log.info('offline.ready'), e => Log.warn('offline.failed', { name: e.name }));
+}
+</script>
+</body>
+</html>
