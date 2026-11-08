@@ -182,7 +182,7 @@
    ===================================================================== */
 
 /* ---------- 1. Basic app settings ---------- */
-const APP = { name: 'Window Cleaning', slug: 'window-cleaning', version: '1.3.1', macDataVersion: 2 };
+const APP = { name: 'Window Cleaning', slug: 'window-cleaning', version: '1.3.2', macDataVersion: 2 };
 const PHONE_SLUG = APP.slug + '-phone';               // marks the files and storage this phone app makes
 const STORE_KEY = PHONE_SLUG + '-data';               // where your round is saved on the phone
 const LOG_KEY = PHONE_SLUG + '-logs';                 // where troubleshooting logs are saved
@@ -506,7 +506,7 @@ function jobCard(c) {
       (isConfirmed(c) ? '<span class="badge good">✓ Confirmed</span>' : '') + (isTexted(c) ? '<span class="badge info">💬 Texted</span>' : '') + balanceBadge(b) +
       (late > 0 || isConfirmed(c) || isTexted(c) || b ? '<br>' : '') + meta.join(' · ') + '</div></div>' +
     '<div class="job-btns">' + (smsHref(c.phone) ? '<a class="go' + (isTexted(c) ? ' sent' : '') + '" href="' + esc(smsHref(c.phone, reminderText(c, reminderDate(c), data.smsTemplate))) +
-      '" data-texted="' + c.id + '" aria-label="Text a reminder to ' + esc(c.name) + '">💬</a>' : '') +
+      '" data-texted="' + c.id + '" aria-label="' + (isTexted(c) ? 'Texted. Text ' + esc(c.name) + ' again' : 'Text a reminder to ' + esc(c.name)) + '">' + (isTexted(c) ? '👍🏼' : '💬') + '</a>' : '') + // 👍🏼 once texted for this clean
     (mapsUrl(c) ? '<a class="go" href="' + esc(mapsUrl(c)) + '" aria-label="Directions to ' + esc(c.name) + '">🧭</a>' : '') +
     '<button class="tick" data-action="quickDone" data-id="' + c.id + '" aria-label="Mark ' + esc(c.name) + ' done">✓</button></div></div>';
 }
