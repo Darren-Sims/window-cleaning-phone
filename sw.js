@@ -2,7 +2,7 @@
    It keeps a copy of the app's own files on the phone so the app opens with no signal.
    It only ever stores and fetches the app's files. Your round is never sent anywhere:
    it lives in the phone's storage, which this file doesn't touch. */
-const CACHE = 'wc-phone-1.3.0';   // change this whenever the app's files change
+const CACHE = 'wc-phone-1.3.1';   // change this whenever the app's files change
 const FILES = ['./', './index.html', './manifest.webmanifest', './icon-180.png', './icon-512.png'];
 
 // First visit: save the app's files.
