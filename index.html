@@ -93,9 +93,11 @@
   .tick { flex: 0 0 auto; width: 52px; height: 52px; border-radius: 50%; border: 2px solid var(--good);
     background: var(--card); color: var(--good); font-size: 26px; font-weight: 700; cursor: pointer; line-height: 1; }
   .tick:active { background: var(--good); color: #fff; }
-  .go { flex: 0 0 auto; width: 44px; height: 44px; border-radius: 50%; border: 2px solid var(--brand); color: var(--brand);
+  .go { flex: 0 0 auto; width: 42px; height: 42px; border-radius: 50%; border: 2px solid var(--brand); color: var(--brand);
     display: flex; align-items: center; justify-content: center; font-size: 20px; text-decoration: none; }
   .go:active { background: var(--brand-soft); }
+  .go.sent { background: var(--brand-soft); }
+  .job-btns { display: flex; gap: 6px; align-items: center; }
   .done-list { list-style: none; padding: 0; margin: 0; }
   .done-list li { display: flex; gap: 8px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 15px; }
   .done-list li:last-child { border-bottom: 0; }
@@ -179,7 +181,7 @@
    ===================================================================== */
 
 /* ---------- 1. Basic app settings ---------- */
-const APP = { name: 'Window Cleaning', slug: 'window-cleaning', version: '1.2.0', macDataVersion: 2 };
+const APP = { name: 'Window Cleaning', slug: 'window-cleaning', version: '1.3.0', macDataVersion: 2 };
 const PHONE_SLUG = APP.slug + '-phone';               // marks the files and storage this phone app makes
 const STORE_KEY = PHONE_SLUG + '-data';               // where your round is saved on the phone
 const LOG_KEY = PHONE_SLUG + '-logs';                 // where troubleshooting logs are saved
@@ -273,7 +275,7 @@ const $ = sel => document.querySelector(sel);
    data.visits / data.payments: cleans, skips and payments recorded on the phone that the Mac
                    hasn't confirmed yet. They're cleared when a Mac file that includes them is loaded. */
 let storageOK = true;
-const emptyData = () => ({ app: PHONE_SLUG, version: 1, businessName: '', fromMac: null, loadedAt: null,
+const emptyData = () => ({ app: PHONE_SLUG, version: 1, businessName: '', smsTemplate: '', fromMac: null, loadedAt: null,
   lastSent: null, lastMethod: 'Cash', customers: [], visits: [], payments: [] });
 let data = emptyData();
 let loadProblem = false;
@@ -321,6 +323,8 @@ function lastDoneOf(c) {
 }
 // Confirmed by the customer on the Mac (only counts while the date hasn't changed).
 const isConfirmed = c => !!c.confirmed && c.confirmed === c.nextDue;
+// A reminder has been texted for this clean (tracked on this phone only; moving or doing the job clears it).
+const isTexted = c => !!c.texted && c.texted === c.nextDue;
 const byAreaThenAddress = (a, b) =>
   (a.area || '￿').localeCompare(b.area || '￿') || (a.address || '').localeCompare(b.address || '') || a.name.localeCompare(b.name);
 // Jobs to show for a day. Today also includes anything overdue.
@@ -340,6 +344,41 @@ function pending() {
   return { done, skipped: data.visits.length - done, payments: data.payments.length, newCust, located,
     paid: data.payments.reduce((s, p) => s + p.amount, 0), total: data.visits.length + data.payments.length + newCust + located };
 }
+// Reminder text message. The wording can be changed in the settings; these bits are filled in for each customer:
+// {first name}, {name}, {day} ("today", "tomorrow", "on Thursday"…) and {date} ("Thursday 12 November").
+const DEFAULT_SMS = "Hello {first name}, I'll be there {day} to clean the windows. Thanks";
+const TITLE_RE = /^(mr|mrs|ms|miss|mx|dr)\.?\s/i;
+function firstName(name) {
+  const n = String(name || '').trim();
+  if (!n || TITLE_RE.test(n)) return n;                  // "Mrs Smith" stays as it is
+  const words = n.split(/\s+/);
+  const and = words.findIndex(w => w === '&' || /^and$/i.test(w));
+  if (and > 0) return (words.length > and + 2 ? words.slice(0, -1) : words).join(' '); // "John & Mary Smith" → "John & Mary"
+  return words[0];
+}
+const longDate = s => parseDate(s).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
+function dayWords(date) {
+  const d = daysBetween(today(), date);
+  if (d <= 0) return 'today';
+  if (d === 1) return 'tomorrow';
+  if (d < 7) return 'on ' + parseDate(date).toLocaleDateString('en-GB', { weekday: 'long' });
+  return 'on ' + longDate(date);
+}
+function reminderText(c, date, template) {
+  return (template && template.trim() ? template : DEFAULT_SMS)
+    .replace(/\{\s*first\s*name\s*\}/gi, firstName(c.name)).replace(/\{\s*name\s*\}/gi, c.name.trim())
+    .replace(/\{\s*day\s*\}/gi, dayWords(date)).replace(/\{\s*date\s*\}/gi, longDate(date));
+}
+// A link that opens Messages with the text already typed in, ready to send.
+// Apple's Messages app expects "&body=" after the number; other phones use "?body=".
+function smsHref(phone, body) {
+  const num = String(phone || '').replace(/[^\d+]/g, ''); if (!num) return null;
+  const apple = /iPhone|iPad|iPod|Macintosh/.test(navigator.userAgent);
+  return 'sms:' + num + (body ? (apple ? '&' : '?') + 'body=' + encodeURIComponent(body) : '');
+}
+// The date to mention in a reminder: the job's due date, or today if it's overdue.
+const reminderDate = c => c.nextDue < today() ? today() : c.nextDue;
+
 // A saved GPS spot: { lat, lng, acc (accuracy in metres), at (date saved) }.
 const validLoc = l => !!l && typeof l === 'object' && Number.isFinite(l.lat) && Number.isFinite(l.lng) && Math.abs(l.lat) <= 90 && Math.abs(l.lng) <= 180;
 // A link that opens Apple Maps with driving directions: to the saved GPS spot if there is one, otherwise to the address.
@@ -374,6 +413,7 @@ function render() {
     $('#pendingDot').innerHTML = p.total ? '<span class="dot">' + p.total + '</span>' : '';
     renderBanners();
     ({ round: renderRound, customers: renderCustomers, mac: renderMac })[ui.tab]();
+    smsPreview();
   } catch (e) {
     Log.error('render.failed', { view: ui.tab, message: e.message });
     viewEl.innerHTML = '<div class="banner bad">Sorry, this screen could not be shown. Please copy the log from the Mac tab and send it for help.</div>';
@@ -461,10 +501,12 @@ function jobCard(c) {
     '<div class="job-main"><div class="job-name">' + esc(c.name) + '</div>' +
     '<div class="job-addr">' + esc(c.address || 'No address') + '</div>' +
     '<div class="job-meta">' + (late > 0 ? '<span class="badge warn">' + plural(late, 'day') + ' late</span>' : '') +
-      (isConfirmed(c) ? '<span class="badge good">✓ Confirmed</span>' : '') + balanceBadge(b) +
-      (late > 0 || isConfirmed(c) || b ? '<br>' : '') + meta.join(' · ') + '</div></div>' +
+      (isConfirmed(c) ? '<span class="badge good">✓ Confirmed</span>' : '') + (isTexted(c) ? '<span class="badge info">💬 Texted</span>' : '') + balanceBadge(b) +
+      (late > 0 || isConfirmed(c) || isTexted(c) || b ? '<br>' : '') + meta.join(' · ') + '</div></div>' +
+    '<div class="job-btns">' + (smsHref(c.phone) ? '<a class="go' + (isTexted(c) ? ' sent' : '') + '" href="' + esc(smsHref(c.phone, reminderText(c, reminderDate(c), data.smsTemplate))) +
+      '" data-texted="' + c.id + '" aria-label="Text a reminder to ' + esc(c.name) + '">💬</a>' : '') +
     (mapsUrl(c) ? '<a class="go" href="' + esc(mapsUrl(c)) + '" aria-label="Directions to ' + esc(c.name) + '">🧭</a>' : '') +
-    '<button class="tick" data-action="quickDone" data-id="' + c.id + '" aria-label="Mark ' + esc(c.name) + ' done">✓</button></div>';
+    '<button class="tick" data-action="quickDone" data-id="' + c.id + '" aria-label="Mark ' + esc(c.name) + ' done">✓</button></div></div>';
 }
 
 // CUSTOMERS: search, tap for details, add a new one.
@@ -490,6 +532,11 @@ function renderMac() {
     (data.lastSent ? '<p class="small muted">Last sent ' + new Date(data.lastSent).toLocaleString('en-GB') + '.</p>' : '') +
     '<button class="btn primary block" data-action="sendToMac"' + (p.total ? '' : ' disabled') + '>Send to Mac (AirDrop)</button>' +
     '<p class="small muted">Then on the Mac: <b>Backup &amp; Settings → Bring in from phone…</b> Sending twice is fine: nothing is added twice.</p></div>' +
+    '<div class="card"><h3 style="margin-top:0">💬 Reminder text</h3><p class="small">Tap 💬 on a job to open Messages with this ready to send. ' +
+      '<b>{first name}</b> and <b>{day}</b> are filled in for each customer ("tomorrow", "on Thursday"…). You can also use <b>{name}</b> and <b>{date}</b>.</p>' +
+      '<textarea id="smsTpl" rows="3" maxlength="500">' + esc(data.smsTemplate || DEFAULT_SMS) + '</textarea>' +
+      '<p class="small muted" id="smsPreview"></p>' +
+      '<div class="row"><button class="btn primary" data-action="saveSms">Save</button><button class="btn" data-action="resetSms">Reset</button></div></div>' +
     '<div class="card"><h3 style="margin-top:0">2. Load your round from the Mac</h3>' +
     '<p>' + (data.fromMac ? 'This phone has your round from the Mac made <b>' + esc(new Date(data.fromMac).toLocaleString('en-GB')) + '</b>.' : 'Your round hasn\'t been loaded from the Mac yet.') + '</p>' +
     '<button class="btn block" data-action="loadFromMac">Load from Mac…</button>' +
@@ -533,7 +580,9 @@ function openJob(id) {
   let h = '<div class="info">' +
     '<p>' + esc(c.address || 'No address') + (c.area ? ' · ' + esc(c.area) : '') + '</p>' +
     (num || mapsUrl(c) ? '<div class="contact">' + (mapsUrl(c) ? '<a class="btn primary" href="' + esc(mapsUrl(c)) + '">🧭 Directions</a>' : '') +
-      (num ? '<a class="btn" href="sms:' + esc(num) + '">💬 Text</a><a class="btn" href="tel:' + esc(num) + '">📞 Call</a>' : '') + '</div>' : '') +
+      (num ? '<a class="btn" href="' + esc(smsHref(c.phone, reminderText(c, reminderDate(c), data.smsTemplate))) + '" data-texted="' + id + '">💬 Remind</a><a class="btn" href="tel:' + esc(num) + '">📞 Call</a>' : '') + '</div>' : '') +
+    (num ? '<p class="small muted">💬 Remind opens Messages with: “' + esc(reminderText(c, reminderDate(c), data.smsTemplate)) + '” You can change it before sending.' +
+      (isTexted(c) ? ' <b>Already texted for this clean.</b>' : '') + '</p>' : '') +
     '<p class="small">' + (validLoc(c.loc) ? '📍 Exact spot saved ' + (isDate(c.loc.at) ? fmtShort(c.loc.at) : '') + '. Directions go there. <button class="link" data-action="saveLoc" data-id="' + id + '">Update</button>'
       : '📍 Directions use the address. At the house? <button class="link" data-action="saveLoc" data-id="' + id + '">Save this spot</button>') + '</p>' +
     '<p class="small">' + money(c.price) + ' · ' + esc(freqLabel(c)) + (Number.isInteger(c.mins) ? ' · ' + fmtMins(c.mins) : '') + '</p>' +
@@ -723,13 +772,17 @@ function roundFromBackup(obj) {
   d.fromMac = typeof obj.exportedAt === 'string' ? obj.exportedAt : new Date().toISOString();
   d.loadedAt = new Date().toISOString();
   d.lastMethod = data.lastMethod;
+  const macSms = obj.settings && typeof obj.settings.smsTemplate === 'string' ? obj.settings.smsTemplate.slice(0, 500) : '';
+  d.smsTemplate = data.smsTemplate || macSms;
+  const texted = {}; data.customers.forEach(c => { if (c.texted) texted[c.id] = c.texted; });
   d.customers = obj.customers.filter(c => c.active !== false).map(c => {
     let every = c.every, unit = c.unit;
     if (every === undefined) { every = c.freqWeeks; unit = 'weeks'; }
     return { id: c.id, name: c.name.trim(), address: str(c.address), area: str(c.area).trim(), phone: str(c.phone), notes: str(c.notes),
       price: c.price, every, unit, nextDue: c.nextDue, opening: 0, active: true, created: str(c.created),
       ...(Number.isInteger(c.mins) ? { mins: c.mins } : {}), ...(isDate(c.confirmed) ? { confirmed: c.confirmed } : {}),
-      ...(validLoc(c.loc) ? { loc: c.loc } : {}), bal: bal[c.id], last: last[c.id] };
+      ...(validLoc(c.loc) ? { loc: c.loc } : {}), bal: bal[c.id], last: last[c.id],
+      ...(texted[c.id] === c.nextDue ? { texted: c.nextDue } : {}) }; // keep "Texted" if the date hasn't changed
   });
   return d;
 }
@@ -791,6 +844,13 @@ const actions = {
   markJob(id, el) { markJob(id, el.dataset.status, ($('#j_method') || {}).value); },
   undoVisit(id) { undoVisit(id); },
   saveLoc(id) { saveLocation(id); },
+  saveSms() {
+    const v = $('#smsTpl').value.trim().slice(0, 500);
+    data.smsTemplate = v === DEFAULT_SMS ? '' : v;
+    if (save('reminder.template.saved', { custom: !!data.smsTemplate })) toast('Reminder text saved.');
+    render();
+  },
+  resetSms() { $('#smsTpl').value = DEFAULT_SMS; smsPreview(); },
   toastUndo() { const u = toastUndo; $('#toast').className = ''; toastUndo = null; if (u) u(); },
   addCustomer() { openAddCustomer(); },
   submitCustomer() { submitCustomer(); },
@@ -815,14 +875,27 @@ const actions = {
 document.addEventListener('click', e => {
   const tab = e.target.closest('#nav button');
   if (tab) return show(tab.dataset.tab);
-  if (e.target.closest('a[href]')) { Log.info('link.open', { kind: e.target.closest('a').href.split(':')[0] }); return; } // Directions, Text, Call: let the phone open them
+  const link = e.target.closest('a[href]');
+  if (link) { // Directions, Text, Call: let the phone open them
+    Log.info('link.open', { kind: link.href.split(':')[0] });
+    const c = link.dataset.texted && findCustomer(link.dataset.texted);
+    if (c) { c.texted = c.nextDue; save('reminder.texted', { customer: c.id }); setTimeout(render, 500); }
+    return;
+  }
   const el = e.target.closest('[data-action]');
   if (!el || !actions[el.dataset.action]) return;
   e.preventDefault();
   try { actions[el.dataset.action](el.dataset.id, el); }
   catch (err) { Log.error('action.failed', { action: el.dataset.action, message: err.message }); toast('Something went wrong. Please try again.', true); }
 });
+// Shows the reminder text as the first customer would get it.
+function smsPreview() {
+  const box = $('#smsTpl'), out = $('#smsPreview'); if (!box || !out) return;
+  const c = active()[0] || { name: 'Sam Smith', nextDue: addDays(today(), 1) };
+  out.textContent = 'Example: ' + reminderText(c, addDays(today(), 1), box.value);
+}
 document.addEventListener('input', e => {
+  if (e.target.id === 'smsTpl') return smsPreview();
   if (e.target.id === 'search') {
     ui.search = e.target.value;
     const pos = e.target.selectionStart; renderCustomers();
