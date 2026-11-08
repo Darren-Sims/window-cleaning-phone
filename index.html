@@ -182,7 +182,7 @@
    ===================================================================== */
 
 /* ---------- 1. Basic app settings ---------- */
-const APP = { name: 'Window Cleaning', slug: 'window-cleaning', version: '1.3.2', macDataVersion: 2 };
+const APP = { name: 'Window Cleaning', slug: 'window-cleaning', version: '1.3.3', macDataVersion: 2 };
 const PHONE_SLUG = APP.slug + '-phone';               // marks the files and storage this phone app makes
 const STORE_KEY = PHONE_SLUG + '-data';               // where your round is saved on the phone
 const LOG_KEY = PHONE_SLUG + '-logs';                 // where troubleshooting logs are saved
@@ -918,7 +918,15 @@ Log.info('app.start', { version: APP.version, standalone: isStandalone(), protoc
 // Offline helper: keeps the app's own files on the phone so it opens with no signal.
 // Only works when the app is opened from its web address (not from a file).
 if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
-  navigator.serviceWorker.register('sw.js').then(() => Log.info('offline.ready'), e => Log.warn('offline.failed', { name: e.name }));
+  // When a new version has been downloaded and takes over, reload once so it shows straight away.
+  const hadVersion = !!navigator.serviceWorker.controller;
+  let reloading = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadVersion || reloading) return;
+    reloading = true; Log.info('update.installed'); location.reload();
+  });
+  navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(reg => { Log.info('offline.ready'); reg.update().catch(() => {}); },
+    e => Log.warn('offline.failed', { name: e.name }));
 }
 </script>
 </body>

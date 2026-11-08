@@ -2,12 +2,13 @@
    It keeps a copy of the app's own files on the phone so the app opens with no signal.
    It only ever stores and fetches the app's files. Your round is never sent anywhere:
    it lives in the phone's storage, which this file doesn't touch. */
-const CACHE = 'wc-phone-1.3.2';   // change this whenever the app's files change
+const CACHE = 'wc-phone-1.3.3';   // change this whenever the app's files change
 const FILES = ['./', './index.html', './manifest.webmanifest', './icon-180.png', './icon-512.png'];
 
-// First visit: save the app's files.
+// First visit (or a new version): save the app's files. "reload" makes sure they come fresh from the
+// web address, not from a copy the phone kept earlier (GitHub lets phones keep copies for 10 minutes).
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES)).then(() => self.skipWaiting()));
+  e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES.map(f => new Request(f, { cache: 'reload' })))).then(() => self.skipWaiting()));
 });
 // A new version took over: delete the old saved copy.
 self.addEventListener('activate', e => {
@@ -21,7 +22,7 @@ self.addEventListener('fetch', e => {
   if (req.method !== 'GET' || new URL(req.url).origin !== location.origin) return;
   e.respondWith(caches.open(CACHE).then(async cache => {
     const saved = await cache.match(req, { ignoreSearch: true });
-    const fresh = fetch(req).then(res => { if (res.ok) cache.put(req, res.clone()); return res; }).catch(() => null);
+    const fresh = fetch(req, { cache: 'no-cache' }).then(res => { if (res.ok) cache.put(req, res.clone()); return res; }).catch(() => null);
     if (saved) { e.waitUntil(fresh); return saved; }
     return (await fresh) || new Response('Offline', { status: 503 });
   }));
